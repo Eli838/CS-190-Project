@@ -19,6 +19,7 @@ def __():
     import random
     import numpy as np
     import struct
+    import torch.nn.init as init
 
     # input : tensor output: binary string
     def binary(num):
@@ -73,7 +74,7 @@ def __():
 
           if bin_str[0] == '1':
             result *= -1
-          
+
           x_fp8[i][j] = result    
 
       return x_fp8.to(torch.float32)
@@ -88,12 +89,20 @@ def __():
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
         output = x * state_x
         return output
+        
+    def init_weights(m):
+        if isinstance(m, nn.Linear):
+            init.normal_(m.weight, mean=0.0, std=1.0)
+            if m.bias is not None:
+                init.zeros_(m.bias)
     return (
         binary,
         calc_exp,
         calc_mantissa,
         copy,
         dequantize_rowwise,
+        init,
+        init_weights,
         math,
         nn,
         np,
@@ -106,12 +115,13 @@ def __():
 
 
 @app.cell
-def __(dequantize_rowwise, nn, quantize_rowwise):
+def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
     fp16_model = nn.Sequential(
         nn.Linear(64, 64),
         nn.Linear(64, 64)
     )
 
+    fp16_model.apply(init_weights)
 
     print("   unquantized")
     print(fp16_model.state_dict()['0.weight'][0])
