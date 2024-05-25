@@ -78,12 +78,67 @@ def __():
           x_fp8[i][j] = result    
 
       return x_fp8.to(torch.float32)
+        
+    def dt_dequantize(quantized):
+        """
+        Custom dequantization function.
+        Assumes quantized values are in the custom format.
+        """
+        dequantized = torch.zeros_like(quantized, dtype=torch.int32)
+        
+        for i, qval in enumerate(quantized.view(-1)):
+            # Extract the bits
+            sign_bit = (qval >> 7) & 1
+            exp_bits = (qval >> 3) & 0xF
+            bis_flag = (qval >> 2) & 1
+            bis_tree = qval & 0x3
+            
+            # Compute the base value from the bisection tree bits
+            base_value = bis_tree / 4.0
+            
+            # If bisection flag is set, adjust the base value
+            if bis_flag:
+                base_value += 0.5 / 4.0
+            
+            # Compute the dequantized value using the exponent
+            value = base_value * (10 ** -exp_bits)
+            
+            
+    #the input is normalized tensor x,
+    def round_dt8(x, exp = 4):
+        x_dt8 = x.clone().to(torch.float32)
+        for i, row in enumerate(x_dt8):
+            for j, val in enumerate(row):
+                # Determine sign bit
+                sign_bit = 0 if val >= 0 else 1
+        
+                # Absolute value for further processing
+                abs_val = abs(val)
+                        # Determine the exponent bits (4 bits)
+                exp_bits = 0
+                for j in range(15):
+                    if abs_val < 10**-j:
+                        exp_bits = j - 1
+                        break
+                
+                # Determine the bisection tree flag and binary bisection tree bits (3 bits)
+                bis_flag = 1 if abs_val % (10**-exp_bits) != 0 else 0
+                bis_tree = int((abs_val / (10**-exp_bits)) * 4) % 4
+                
+                # Combine the bits
+                row[j] = (sign_bit << 7) | (exp_bits << 3) | (bis_flag << 2) | bis_tree
+                # row[j] = dt_dequantize(row[j])
 
-    def quantize_rowwise(x: torch.Tensor):
+        return x_dt8
+                
+    def quantize_rowwise(x: torch.Tensor, dt = False):
         abso = torch.abs(x)
         output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
         output = x[0]  / output_maxs[0,None]
-        output = round_fp8(output)
+        if not dt:
+            output = round_fp8(output)
+        else:
+            output = round_dt8(output)
         return output, output_maxs
 
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
@@ -101,6 +156,7 @@ def __():
         calc_mantissa,
         copy,
         dequantize_rowwise,
+        dt_dequantize,
         init,
         init_weights,
         math,
@@ -108,6 +164,7 @@ def __():
         np,
         quantize_rowwise,
         random,
+        round_dt8,
         round_fp8,
         struct,
         torch,
@@ -127,17 +184,26 @@ def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
     print(fp16_model.state_dict()['0.weight'][0])
     #print(bnb.triton.quantize_rowwise.quantize_rowwise)
     testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
+    testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
 
     print("quantized")
     print(testing[0])
 
     print("dequantized")
     print(dequantize_rowwise(testing,testmax)[0])
+
+
+
+    print("quantized_dt")
+    print(testing_dt[0])
+
+    print("dequantized")
+    print(dequantize_rowwise(testing_dt,dt_max)[0])
     #int8_model.load_state_dict(fp16_model.state_dict())
     #print(torch.cuda.is_available())
     #int8_model = int8_model.to(0) # Quantization happens here
     #print(int8_model.state_dict()['0.weight'][0])
-    return fp16_model, testing, testmax
+    return dt_max, fp16_model, testing, testing_dt, testmax
 
 
 @app.cell
