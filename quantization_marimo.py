@@ -78,32 +78,32 @@ def __():
           x_fp8[i][j] = result    
 
       return x_fp8.to(torch.float32)
-        
+
     def dt_dequantize(quantized):
         """
         Custom dequantization function.
         Assumes quantized values are in the custom format.
         """
         dequantized = torch.zeros_like(quantized, dtype=torch.int32)
-        
+
         for i, qval in enumerate(quantized.view(-1)):
             # Extract the bits
             sign_bit = (qval >> 7) & 1
             exp_bits = (qval >> 3) & 0xF
             bis_flag = (qval >> 2) & 1
             bis_tree = qval & 0x3
-            
+
             # Compute the base value from the bisection tree bits
             base_value = bis_tree / 4.0
-            
+
             # If bisection flag is set, adjust the base value
             if bis_flag:
                 base_value += 0.5 / 4.0
-            
+
             # Compute the dequantized value using the exponent
             value = base_value * (10 ** -exp_bits)
-            
-            
+
+
     #the input is normalized tensor x,
     def round_dt8(x, exp = 4):
         x_dt8 = x.clone().to(torch.float32)
@@ -111,26 +111,26 @@ def __():
             for j, val in enumerate(row):
                 # Determine sign bit
                 sign_bit = 0 if val >= 0 else 1
-        
+
                 # Absolute value for further processing
                 abs_val = abs(val)
                         # Determine the exponent bits (4 bits)
                 exp_bits = 0
-                for j in range(15):
-                    if abs_val < 10**-j:
-                        exp_bits = j - 1
+                for k in range(15):
+                    if abs_val < 10**-k:
+                        exp_bits = k - 1
                         break
-                
+
                 # Determine the bisection tree flag and binary bisection tree bits (3 bits)
                 bis_flag = 1 if abs_val % (10**-exp_bits) != 0 else 0
                 bis_tree = int((abs_val / (10**-exp_bits)) * 4) % 4
-                
+
                 # Combine the bits
                 row[j] = (sign_bit << 7) | (exp_bits << 3) | (bis_flag << 2) | bis_tree
                 # row[j] = dt_dequantize(row[j])
 
         return x_dt8
-                
+
     def quantize_rowwise(x: torch.Tensor, dt = False):
         abso = torch.abs(x)
         output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
@@ -144,7 +144,7 @@ def __():
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
         output = x * state_x
         return output
-        
+
     def init_weights(m):
         if isinstance(m, nn.Linear):
             init.normal_(m.weight, mean=0.0, std=1.0)
@@ -204,6 +204,44 @@ def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
     #int8_model = int8_model.to(0) # Quantization happens here
     #print(int8_model.state_dict()['0.weight'][0])
     return dt_max, fp16_model, testing, testing_dt, testmax
+
+
+@app.cell
+def __(torch):
+    def measure_quantization_error(original_tensor, dequantized_tensor):
+        """
+        Measures the quantization error in terms of absolute errors.
+        """
+        abs_error = torch.abs(original_tensor - dequantized_tensor)
+
+        return torch.mean(abs_error), abs_error
+    return measure_quantization_error,
+
+
+@app.cell
+def __(
+    dequantize_rowwise,
+    fp16_model,
+    measure_quantization_error,
+    testing,
+    testmax,
+):
+    fp8_mae, fp8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
+    print("fp8 mean abs error: ", fp8_mae)
+    return fp8_err, fp8_mae
+
+
+@app.cell
+def __(
+    dequantize_rowwise,
+    fp16_model,
+    measure_quantization_error,
+    testing_dt,
+    testmax,
+):
+    dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,testmax)[0])
+    print("dt8 mean abs error: ", dt8_mae)
+    return dt8_err, dt8_mae
 
 
 @app.cell
