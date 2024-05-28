@@ -78,36 +78,54 @@ def __():
           x_fp8[i][j] = result    
 
       return x_fp8.to(torch.float32)
+    def bisection_quantization(num, bits = 7):
+        val = abs(num)
+        inversed_bits = []
+        # Bisection tree quantization
+        range_min, range_max = 0, 1
+        for _ in range(bits):
+            mid = (range_min + range_max) / 2
+            if val >= mid:
+                inversed_bits.append(1)
+                range_min = mid
+            else:
+                inversed_bits.append(0)
+                range_max = mid
 
+        quantized_val = 0
+        for k, bit in enumerate(inversed_bits):
+            if bit:
+                quantized_val += 2**-(k + 1)
+                
+        return quantized_val
+        
     #the input is normalized tensor x,
     def round_dt8(x, exp = 4):
         x_dt8 = x.clone().to(torch.float32)
         output = torch.zeros_like(x_dt8)
         num_levels = 2 ** (7)
-        
+
         for i, row in enumerate(x_dt8):
             for j, val in enumerate(row):
                 sign_bit = 0 if val >= 0 else 1
-                inversed_bits = []
                 val = abs(val)
-                
-                # Bisection tree quantization
-                range_min, range_max = 0, 1
-                for _ in range(7):
-                    mid = (range_min + range_max) / 2
-                    if val >= mid:
-                        inversed_bits.append(1)
-                        range_min = mid
-                    else:
-                        inversed_bits.append(0)
-                        range_max = mid
-                
-                quantized_val = 0
-                for k, bit in enumerate(inversed_bits):
-                    if bit:
-                        quantized_val += 2**-(k + 1)
-                        
+                exp_bits = 0
+                while val < 0.1:
+                    val *= 10
+                    exp_bits += 1
+
+                bs_bits = max(0, 6 - exp_bits)
+                exp_bits = min(7, exp_bits)
+
+                if exp_bits == 0:
+                    quantized_val = bisection_quantization(val, 7)
+                elif exp_bits >= 6:
+                    quantized_val = val
+                else:
+                    quantized_val = bisection_quantization(val, bs_bits)
+                    
                 quantized_val = quantized_val if sign_bit == 0 else -quantized_val
+                quantized_val *= 10**(-exp_bits)
                 output[i, j] = quantized_val
 
         return output
@@ -133,6 +151,7 @@ def __():
                 init.zeros_(m.bias)
     return (
         binary,
+        bisection_quantization,
         calc_exp,
         calc_mantissa,
         copy,
