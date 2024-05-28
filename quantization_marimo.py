@@ -79,57 +79,38 @@ def __():
 
       return x_fp8.to(torch.float32)
 
-    def dt_dequantize(quantized):
-        """
-        Custom dequantization function.
-        Assumes quantized values are in the custom format.
-        """
-        dequantized = torch.zeros_like(quantized, dtype=torch.int32)
-
-        for i, qval in enumerate(quantized.view(-1)):
-            # Extract the bits
-            sign_bit = (qval >> 7) & 1
-            exp_bits = (qval >> 3) & 0xF
-            bis_flag = (qval >> 2) & 1
-            bis_tree = qval & 0x3
-
-            # Compute the base value from the bisection tree bits
-            base_value = bis_tree / 4.0
-
-            # If bisection flag is set, adjust the base value
-            if bis_flag:
-                base_value += 0.5 / 4.0
-
-            # Compute the dequantized value using the exponent
-            value = base_value * (10 ** -exp_bits)
-
-
     #the input is normalized tensor x,
     def round_dt8(x, exp = 4):
         x_dt8 = x.clone().to(torch.float32)
+        output = torch.zeros_like(x_dt8)
+        num_levels = 2 ** (7)
+        
         for i, row in enumerate(x_dt8):
             for j, val in enumerate(row):
-                # Determine sign bit
                 sign_bit = 0 if val >= 0 else 1
+                inversed_bits = []
+                val = abs(val)
+                
+                # Bisection tree quantization
+                range_min, range_max = 0, 1
+                for _ in range(7):
+                    mid = (range_min + range_max) / 2
+                    if val >= mid:
+                        inversed_bits.append(1)
+                        range_min = mid
+                    else:
+                        inversed_bits.append(0)
+                        range_max = mid
+                
+                quantized_val = 0
+                for k, bit in enumerate(inversed_bits):
+                    if bit:
+                        quantized_val += 2**-(k + 1)
+                        
+                quantized_val = quantized_val if sign_bit == 0 else -quantized_val
+                output[i, j] = quantized_val
 
-                # Absolute value for further processing
-                abs_val = abs(val)
-                        # Determine the exponent bits (4 bits)
-                exp_bits = 0
-                for k in range(15):
-                    if abs_val < 10**-k:
-                        exp_bits = k - 1
-                        break
-
-                # Determine the bisection tree flag and binary bisection tree bits (3 bits)
-                bis_flag = 1 if abs_val % (10**-exp_bits) != 0 else 0
-                bis_tree = int((abs_val / (10**-exp_bits)) * 4) % 4
-
-                # Combine the bits
-                row[j] = (sign_bit << 7) | (exp_bits << 3) | (bis_flag << 2) | bis_tree
-                # row[j] = dt_dequantize(row[j])
-
-        return x_dt8
+        return output
 
     def quantize_rowwise(x: torch.Tensor, dt = False):
         abso = torch.abs(x)
@@ -156,7 +137,6 @@ def __():
         calc_mantissa,
         copy,
         dequantize_rowwise,
-        dt_dequantize,
         init,
         init_weights,
         math,
@@ -184,7 +164,6 @@ def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
     print(fp16_model.state_dict()['0.weight'][0])
     #print(bnb.triton.quantize_rowwise.quantize_rowwise)
     testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
-    testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
 
     print("quantized")
     print(testing[0])
@@ -193,17 +172,24 @@ def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
     print(dequantize_rowwise(testing,testmax)[0])
 
 
-
-    print("quantized_dt")
-    print(testing_dt[0])
-
-    print("dequantized")
-    print(dequantize_rowwise(testing_dt,dt_max)[0])
     #int8_model.load_state_dict(fp16_model.state_dict())
     #print(torch.cuda.is_available())
     #int8_model = int8_model.to(0) # Quantization happens here
     #print(int8_model.state_dict()['0.weight'][0])
-    return dt_max, fp16_model, testing, testing_dt, testmax
+    return fp16_model, testing, testmax
+
+
+@app.cell
+def __(dequantize_rowwise, fp16_model, quantize_rowwise):
+    testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
+
+    print("   unquantized")
+    print(fp16_model.state_dict()['0.weight'][0])
+    print("quantized_dt")
+    print(testing_dt[0])
+    print("dequantized")
+    print(dequantize_rowwise(testing_dt,dt_max)[0])
+    return dt_max, testing_dt
 
 
 @app.cell
