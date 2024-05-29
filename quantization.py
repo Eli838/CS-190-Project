@@ -6,6 +6,11 @@ import random
 import numpy as np
 import struct
 
+random.seed(0)
+np.random.seed(0)
+torch.manual_seed(0)
+
+
 # input : tensor output: binary string
 def binary(num):
     return ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', num))
@@ -42,33 +47,30 @@ def round_fp8(x, exp = 4):
   output  x_32:   quantized tensor
   '''
 
-  x_fp8 = x.clone().to(torch.float32)
+  x_fp8 = copy.deepcopy(x)
 
-  for i in range(len(x_fp8)):
-    for j in range(len(x_fp8[i])):
-      result = 1.0
-      bin_str = binary(x[i][j])
 
-      bin_mantissa = bin_str[9:32]
-      res_mantissa = bin_mantissa[:7-exp]    
-      result += calc_mantissa(res_mantissa)
+  result = 1.0
+  bin_str = binary(x)
 
-      bin_exp = bin_str[1:9]
-      exp_int = calc_exp(bin_exp, exp)
-      result *= 2**exp_int
+  bin_mantissa = bin_str[9:32]
+  res_mantissa = bin_mantissa[:7-exp]    
+  result += calc_mantissa(res_mantissa)
 
-      if bin_str[0] == '1':
-        result *= -1
-      
-      x_fp8[i][j] = result    
+  bin_exp = bin_str[1:9]
+  exp_int = calc_exp(bin_exp, exp)
+  result *= 2**exp_int
 
-  return x_fp8.to(torch.float32)
+  if bin_str[0] == '1':
+    result *= -1
+  
+  return result
 
 def quantize_rowwise(x: torch.Tensor):
     abso = torch.abs(x)
     output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
-    output = x[0]  / output_maxs[0,None]
-    output = round_fp8(output)
+    output = x / output_maxs[0,None]
+    output.apply_(round_fp8)
     return output, output_maxs
 
 def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
@@ -83,15 +85,17 @@ fp16_model = nn.Sequential(
 
 
 print("   unquantized")
-print(fp16_model.state_dict()['0.weight'][0])
+print(fp16_model.state_dict()['0.weight'].shape)
 #print(bnb.triton.quantize_rowwise.quantize_rowwise)
 testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
 
 print("quantized")
+print(testing.shape)
 print(testing[0])
+print(testing[1])
 
 print("dequantized")
-print(dequantize_rowwise(testing,testmax)[0])
+print(dequantize_rowwise(testing,testmax).shape)
 #int8_model.load_state_dict(fp16_model.state_dict())
 #print(torch.cuda.is_available())
 #int8_model = int8_model.to(0) # Quantization happens here
