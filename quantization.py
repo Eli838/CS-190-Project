@@ -151,7 +151,7 @@ def quantize_stable_embedding(x, batch_size, dt = False):
 
   return output.reshape(x.shape), maxes, indexing
 
-def dequantize_stable_embedding(input, maxes, indexing, dt=False):
+def dequantize_stable_embedding(input, maxes, indexing):
   outreshape = input.reshape(indexing.shape)
 
   dequant = dequantize_rowwise(outreshape, maxes)
