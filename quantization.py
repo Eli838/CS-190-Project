@@ -117,7 +117,7 @@ def round_dt8(x, exp = 4):
 def quantize_rowwise(x: torch.Tensor, dt = False):
   '''Takes in a (2d) tensor and returns quantized array
   DT = if you use the dynamic tree quantization. False is using fp8
-  tensor.view( -1,shape[1]) can reshape a 3d tensor to 2d. that should work'''
+  tensor.view( shape[0],-1) can reshape a 3d tensor to 2d. that should work'''
   abso = torch.abs(x)
   output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
   output = x  / output_maxs[None,:]
