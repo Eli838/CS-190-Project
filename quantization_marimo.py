@@ -7,11 +7,20 @@ app = marimo.App()
 @app.cell
 def __():
     import marimo as mo
-    return mo,
+    EXP_COUNT = {0:0,
+                 1:0,
+                 2:0,
+                 3:0,
+                 4:0,
+                 5:0,
+                 6:0,
+                 7:0,
+                }
+    return EXP_COUNT, mo
 
 
 @app.cell
-def __():
+def __(EXP_COUNT):
     import torch
     import torch.nn as nn
     import math
@@ -96,10 +105,10 @@ def __():
         for k, bit in enumerate(inversed_bits):
             if bit:
                 quantized_val += 2**-(k + 1)
-                
+
         return quantized_val
 
-    
+
     #unsigned bisection quantization
     #in-progress
     def bisection_quantization_unsigned(num, bits=7):
@@ -120,8 +129,8 @@ def __():
             if bit:
                 quantized_val += 2**-(k+1)
         return quantized_val
-        
-        
+
+
     #the input is normalized tensor x,
     def round_dt8(x, exp = 4):
         x_dt8 = x.clone().to(torch.float32)
@@ -139,6 +148,7 @@ def __():
 
                 bs_bits = max(0, 6 - exp_bits)
                 exp_bits = min(7, exp_bits)
+                EXP_COUNT[exp_bits] += 1
 
                 if exp_bits == 0:
                     quantized_val = bisection_quantization(val, 7)
@@ -146,14 +156,14 @@ def __():
                     quantized_val = val
                 else:
                     quantized_val = bisection_quantization(val, bs_bits)
-                    
+
                 quantized_val = quantized_val if sign_bit == 0 else -quantized_val
                 quantized_val *= 10**(-exp_bits)
                 output[i, j] = quantized_val
 
         return output
 
-    
+
     #round_dt8_unsigned
     #the input is normalized tensor x
     #in-progress
@@ -177,7 +187,7 @@ def __():
                 quantized_val *= 10**(-exp_bits)
                 val[i][j] = quantized_val
         return val
-        
+
 
     def quantize_rowwise(x: torch.Tensor, dt = False):
         abso = torch.abs(x)
@@ -198,9 +208,14 @@ def __():
             init.normal_(m.weight, mean=0.0, std=1.0)
             if m.bias is not None:
                 init.zeros_(m.bias)
+                
+    def measure_quantization_error(original_tensor, dequantized_tensor):
+        abs_error = torch.abs(original_tensor - dequantized_tensor)
+        return torch.mean(abs_error), abs_error
     return (
         binary,
         bisection_quantization,
+        bisection_quantization_unsigned,
         calc_exp,
         calc_mantissa,
         copy,
@@ -208,11 +223,13 @@ def __():
         init,
         init_weights,
         math,
+        measure_quantization_error,
         nn,
         np,
         quantize_rowwise,
         random,
         round_dt8,
+        round_dt8_unsigned,
         round_fp8,
         struct,
         torch,
@@ -220,82 +237,62 @@ def __():
 
 
 @app.cell
-def __(dequantize_rowwise, init_weights, nn, quantize_rowwise):
-    fp16_model = nn.Sequential(
-        nn.Linear(64, 64),
-        nn.Linear(64, 64)
+def __(
+    EXP_COUNT,
+    dequantize_rowwise,
+    init_weights,
+    measure_quantization_error,
+    nn,
+    quantize_rowwise,
+):
+    num_neurons = [64, 256, 1024]
+    for num in num_neurons:
+        print("#####################", num)
+        fp16_model = nn.Sequential(
+            nn.Linear(num, num),
+            nn.Linear(num, num)
+        )
+
+        fp16_model.apply(init_weights)
+
+        print("   unquantized")
+        print(fp16_model.state_dict()['0.weight'][0])
+        #print(bnb.triton.quantize_rowwise.quantize_rowwise)
+        testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
+
+        print("quantized")
+        print(testing[0])
+
+        print("dequantized")
+        print(dequantize_rowwise(testing,testmax)[0])
+
+        testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
+
+        print("   unquantized")
+        print(fp16_model.state_dict()['0.weight'][0])
+        print("quantized_dt")
+        print(testing_dt[0])
+        print("dequantized")
+        print(dequantize_rowwise(testing_dt,dt_max)[0])
+        fp8_mae, fp8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
+        print("fp8 mean abs error: ", fp8_mae)
+        dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,testmax)[0])
+        print("dt8 mean abs error: ", dt8_mae)
+        print("exp_count: ", EXP_COUNT)
+        print("#####################")
+    return (
+        dt8_err,
+        dt8_mae,
+        dt_max,
+        fp16_model,
+        fp8_err,
+        fp8_mae,
+        num,
+        num_neurons,
+        testing,
+        testing_dt,
+        testmax,
     )
-
-    fp16_model.apply(init_weights)
-
-    print("   unquantized")
-    print(fp16_model.state_dict()['0.weight'][0])
-    #print(bnb.triton.quantize_rowwise.quantize_rowwise)
-    testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
-
-    print("quantized")
-    print(testing[0])
-
-    print("dequantized")
-    print(dequantize_rowwise(testing,testmax)[0])
-
-
-    #int8_model.load_state_dict(fp16_model.state_dict())
-    #print(torch.cuda.is_available())
-    #int8_model = int8_model.to(0) # Quantization happens here
-    #print(int8_model.state_dict()['0.weight'][0])
-    return fp16_model, testing, testmax
-
-
-@app.cell
-def __(dequantize_rowwise, fp16_model, quantize_rowwise):
-    testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
-
-    print("   unquantized")
-    print(fp16_model.state_dict()['0.weight'][0])
-    print("quantized_dt")
-    print(testing_dt[0])
-    print("dequantized")
-    print(dequantize_rowwise(testing_dt,dt_max)[0])
-    return dt_max, testing_dt
-
-
-@app.cell
-def __(torch):
-    def measure_quantization_error(original_tensor, dequantized_tensor):
-        """
-        Measures the quantization error in terms of absolute errors.
-        """
-        abs_error = torch.abs(original_tensor - dequantized_tensor)
-
-        return torch.mean(abs_error), abs_error
-    return measure_quantization_error,
-
-
-@app.cell
-def __(
-    dequantize_rowwise,
-    fp16_model,
-    measure_quantization_error,
-    testing,
-    testmax,
-):
-    fp8_mae, fp8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
-    print("fp8 mean abs error: ", fp8_mae)
-    return fp8_err, fp8_mae
-
-
-@app.cell
-def __(
-    dequantize_rowwise,
-    fp16_model,
-    measure_quantization_error,
-    testing_dt,
-    testmax,
-):
-    dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,testmax)[0])
-    print("dt8 mean abs error: ", dt8_mae)
-    return dt8_err, dt8_mae
 
 
 @app.cell
