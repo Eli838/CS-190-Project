@@ -143,7 +143,7 @@ def quantize_stable_embedding(x, batch_size, dt = False):
     print("Invalid batch size. Batch size should be a divisor of " + str(x.numel()))
     return 
 
-  flatarg = torch.argsort(x.flatten())
+  flatarg = torch.argsort(torch.abs(x.flatten()))
   indexing = flatarg.reshape((x.numel()//batch_size,batch_size))
 
   reshapedx = x.flatten()[indexing]
