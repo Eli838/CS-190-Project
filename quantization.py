@@ -115,6 +115,9 @@ def round_dt8(x, exp = 4):
 
 
 def quantize_rowwise(x: torch.Tensor, dt = False):
+  '''Takes in a (2d) tensor and returns quantized array
+  DT = if you use the dynamic tree quantization. False is using fp8
+  tensor.view( -1,shape[1]) can reshape a 3d tensor to 2d. that should work'''
   abso = torch.abs(x)
   output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
   output = x  / output_maxs[None,:]
@@ -125,6 +128,7 @@ def quantize_rowwise(x: torch.Tensor, dt = False):
   return torch.squeeze(output), output_maxs
 
 def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
+  '''Dequantizes the tensor given the maxes'''
   output = x * state_x
   return output
 
@@ -140,6 +144,12 @@ def measure_quantization_error(original_tensor, dequantized_tensor):
 
 
 def quantize_stable_embedding(x, batch_size, dt = False):
+  '''Qunatizes the given array
+  Batch size must be a divisor of the array size
+  Returns the quantized array, the maximums, and the indexes
+  DT  = false, means using fp8
+  Dt = true, means using the dynamic tree
+  ''''
   if (x.numel() % batch_size != 0):
     print("Invalid batch size. Batch size should be a divisor of " + str(x.numel()))
     return
@@ -153,7 +163,11 @@ def quantize_stable_embedding(x, batch_size, dt = False):
 
   return output.reshape(x.shape), maxes, indexing
 
-def dequantize_stable_embedding(input, maxes, indexing, dt=False):
+def dequantize_stable_embedding(input, maxes, indexing):
+  '''Takes the quantized matrices and dequantizes them by multiplying the normalized and maxes
+  Then uses the indexes to place the dequantized values back into their original spots
+  returns dequantized values in the right positions
+  Takes in the quantized array, the array maximums, and the indexes'''
   outreshape = input.reshape(indexing.shape)
 
   dequant = dequantize_rowwise(outreshape, maxes).flatten()
