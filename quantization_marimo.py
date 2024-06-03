@@ -98,6 +98,29 @@ def __():
                 quantized_val += 2**-(k + 1)
                 
         return quantized_val
+
+    
+    #unsigned bisection quantization
+    #in-progress
+    def bisection_quantization_unsigned(num, bits=7):
+        val = num     #no absolute value since unsigned
+        inversed_bits = []
+        #bisection tree quantization
+        range_min, range_max = 0, 1
+        for _ in range(bits):
+            mid = (range_min + range_max) / 2
+            if val >= mid:
+                inversed_bits.append(1)
+                range_min = mid
+            else:
+                inversed_bits.append(0)
+                range_max = mid
+        quantized_val = 0
+        for k, bit in enumerate(inversed_bits):
+            if bit:
+                quantized_val += 2**-(k+1)
+        return quantized_val
+        
         
     #the input is normalized tensor x,
     def round_dt8(x, exp = 4):
@@ -129,6 +152,32 @@ def __():
                 output[i, j] = quantized_val
 
         return output
+
+    
+    #round_dt8_unsigned
+    #the input is normalized tensor x
+    #in-progress
+    def round_dt8_unsigned(x, exp=4):
+        val = x.clone().to(torch.float32)
+        for i in range(len(val)):
+            for j in range(len(val[i])):
+                abs_val = val[i][j]
+                exp_bits = 0
+                while abs_val < 0.1:
+                    abs_val *= 10
+                    exp_bits += 1
+                bs_bits = max(0, 6 - exp_bits)
+                exp_bits = min(7, exp_bits)
+                if exp_bits == 0:
+                    quantized_val = bisection_quantization_unsigned(abs_val, 7)
+                elif exp_bits >= 6:
+                    quantized_val = abs_val
+                else:
+                    quantized_val = bisection_quantization_unsigned(abs_val, bs_bits)
+                quantized_val *= 10**(-exp_bits)
+                val[i][j] = quantized_val
+        return val
+        
 
     def quantize_rowwise(x: torch.Tensor, dt = False):
         abso = torch.abs(x)
