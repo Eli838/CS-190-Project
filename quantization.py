@@ -138,21 +138,24 @@ def measure_quantization_error(original_tensor, dequantized_tensor):
   abs_error = torch.abs(original_tensor - dequantized_tensor)
   return torch.mean(abs_error), abs_error
 
+
 def quantize_stable_embedding(x, batch_size, dt = False):
   if (x.numel() % batch_size != 0):
     print("Invalid batch size. Batch size should be a divisor of " + str(x.numel()))
-    return 
+    return
 
-  flatarg = torch.argsort(torch.abs(x.flatten()))
+  flatarg = torch.argsort(x.flatten())
   indexing = flatarg.reshape((x.numel()//batch_size,batch_size))
 
   reshapedx = x.flatten()[indexing]
+
   output, maxes = quantize_rowwise(reshapedx,dt)
 
   return output.reshape(x.shape), maxes, indexing
 
-def dequantize_stable_embedding(input, maxes, indexing):
+def dequantize_stable_embedding(input, maxes, indexing, dt=False):
   outreshape = input.reshape(indexing.shape)
 
-  dequant = dequantize_rowwise(outreshape, maxes)
+  dequant = dequantize_rowwise(outreshape, maxes).flatten()
+  dequant[indexing.flatten()] = dequant.clone()
   return dequant.reshape(input.shape)
