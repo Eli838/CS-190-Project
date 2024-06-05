@@ -88,24 +88,25 @@ def __(EXP_COUNT):
 
       return x_fp8.to(torch.float32)
     def bisection_quantization(num, bits = 7):
+        if bits == 0:
+            return 0.1
         val = abs(num)
         inversed_bits = []
         # Bisection tree quantization
         range_min, range_max = 0, 1
-        for _ in range(bits):
-            mid = (range_min + range_max) / 2
-            if val >= mid:
+        for p in range(bits):
+            p += 1
+            bit_val = 2**(-p)
+            if val >= bit_val:
                 inversed_bits.append(1)
-                range_min = mid
+                val -= bit_val
             else:
                 inversed_bits.append(0)
-                range_max = mid
 
         quantized_val = 0
         for k, bit in enumerate(inversed_bits):
             if bit:
                 quantized_val += 2**-(k + 1)
-
         return quantized_val
 
 
@@ -132,7 +133,7 @@ def __(EXP_COUNT):
 
 
     #the input is normalized tensor x,
-    def round_dt8(x, exp = 4):
+    def round_dt8(x, exp = 4, num_bits = 8):
         x_dt8 = x.clone().to(torch.float32)
         output = torch.zeros_like(x_dt8)
         num_levels = 2 ** (7)
@@ -146,14 +147,14 @@ def __(EXP_COUNT):
                     val *= 10
                     exp_bits += 1
 
-                bs_bits = max(0, 6 - exp_bits)
+                bs_bits = max(0, num_bits - 2 - exp_bits)
                 exp_bits = min(7, exp_bits)
                 EXP_COUNT[exp_bits] += 1
 
                 if exp_bits == 0:
-                    quantized_val = bisection_quantization(val, 7)
-                elif exp_bits >= 6:
-                    quantized_val = val
+                    quantized_val = bisection_quantization(val, num_bits - 1)
+                elif exp_bits >= num_bits - 2:
+                    quantized_val = 0.1
                 else:
                     quantized_val = bisection_quantization(val, bs_bits)
 
@@ -189,14 +190,14 @@ def __(EXP_COUNT):
         return val
 
 
-    def quantize_rowwise(x: torch.Tensor, dt = False):
+    def quantize_rowwise(x: torch.Tensor, dt = False, num_bits =8):
         abso = torch.abs(x)
         output_maxs  = torch.max(abso,1)[0].unsqueeze(-1)
         output = x[0]  / output_maxs[0,None]
         if not dt:
             output = round_fp8(output)
         else:
-            output = round_dt8(output)
+            output = round_dt8(output, num_bits = num_bits)
         return output, output_maxs
 
     def dequantize_rowwise(x: torch.Tensor, state_x: torch.Tensor):
@@ -208,7 +209,7 @@ def __(EXP_COUNT):
             init.normal_(m.weight, mean=0.0, std=1.0)
             if m.bias is not None:
                 init.zeros_(m.bias)
-                
+
     def measure_quantization_error(original_tensor, dequantized_tensor):
         abs_error = torch.abs(original_tensor - dequantized_tensor)
         return torch.mean(abs_error), abs_error
@@ -245,12 +246,14 @@ def __(
     nn,
     quantize_rowwise,
 ):
-    num_neurons = [64, 256, 1024]
-    for num in num_neurons:
+    ## usage example
+
+    num_bits = range(3,9)
+    for num in num_bits:
         print("#####################", num)
         fp16_model = nn.Sequential(
-            nn.Linear(num, num),
-            nn.Linear(num, num)
+            nn.Linear(64, 64),
+            nn.Linear(64, 64)
         )
 
         fp16_model.apply(init_weights)
@@ -259,27 +262,30 @@ def __(
         print(fp16_model.state_dict()['0.weight'][0])
         #print(bnb.triton.quantize_rowwise.quantize_rowwise)
         testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
-
         print("quantized")
         print(testing[0])
-
         print("dequantized")
         print(dequantize_rowwise(testing,testmax)[0])
 
-        testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True)
-
+        testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True, num_bits = num)
         print("   unquantized")
         print(fp16_model.state_dict()['0.weight'][0])
         print("quantized_dt")
         print(testing_dt[0])
         print("dequantized")
         print(dequantize_rowwise(testing_dt,dt_max)[0])
+        
         fp8_mae, fp8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
         print("fp8 mean abs error: ", fp8_mae)
-        dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,testmax)[0])
-        print("dt8 mean abs error: ", dt8_mae)
+        
+        dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,dt_max)[0])
+        print("dt",num," mean abs error: ", dt8_mae)
+        
         print("exp_count: ", EXP_COUNT)
         print("#####################")
+        
+        for k in EXP_COUNT.keys():
+            EXP_COUNT[k] = 0
     return (
         dt8_err,
         dt8_mae,
@@ -287,8 +293,9 @@ def __(
         fp16_model,
         fp8_err,
         fp8_mae,
+        k,
         num,
-        num_neurons,
+        num_bits,
         testing,
         testing_dt,
         testmax,
