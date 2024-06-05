@@ -136,7 +136,6 @@ def __(EXP_COUNT):
     def round_dt8(x, exp = 4, num_bits = 8):
         x_dt8 = x.clone().to(torch.float32)
         output = torch.zeros_like(x_dt8)
-        num_levels = 2 ** (7)
 
         for i, row in enumerate(x_dt8):
             for j, val in enumerate(row):
@@ -238,16 +237,9 @@ def __(EXP_COUNT):
 
 
 @app.cell
-def __(
-    EXP_COUNT,
-    dequantize_rowwise,
-    init_weights,
-    measure_quantization_error,
-    nn,
-    quantize_rowwise,
-):
+def __(EXP_COUNT, dequantize_rowwise, init_weights, nn, quantize_rowwise):
     ## usage example
-
+    MAE = nn.L1Loss() 
     num_bits = range(3,9)
     for num in num_bits:
         print("#####################", num)
@@ -258,14 +250,14 @@ def __(
 
         fp16_model.apply(init_weights)
 
-        print("   unquantized")
-        print(fp16_model.state_dict()['0.weight'][0])
-        #print(bnb.triton.quantize_rowwise.quantize_rowwise)
+        # print("   unquantized")
+        # print(fp16_model.state_dict()['0.weight'][0])
+        # #print(bnb.triton.quantize_rowwise.quantize_rowwise)
         testing, testmax = quantize_rowwise(fp16_model.state_dict()['0.weight'])
-        print("quantized")
-        print(testing[0])
-        print("dequantized")
-        print(dequantize_rowwise(testing,testmax)[0])
+        # print("quantized")
+        # print(testing[0])
+        # print("dequantized")
+        # print(dequantize_rowwise(testing,testmax)[0])
 
         testing_dt, dt_max = quantize_rowwise(fp16_model.state_dict()['0.weight'], dt = True, num_bits = num)
         print("   unquantized")
@@ -274,24 +266,23 @@ def __(
         print(testing_dt[0])
         print("dequantized")
         print(dequantize_rowwise(testing_dt,dt_max)[0])
-        
-        fp8_mae, fp8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
+
+        fp8_mae = MAE(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing,testmax)[0])
         print("fp8 mean abs error: ", fp8_mae)
-        
-        dt8_mae, dt8_err = measure_quantization_error(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,dt_max)[0])
+
+        dt8_mae = MAE(fp16_model.state_dict()['0.weight'], dequantize_rowwise(testing_dt,dt_max)[0])
         print("dt",num," mean abs error: ", dt8_mae)
-        
+
         print("exp_count: ", EXP_COUNT)
         print("#####################")
-        
+
         for k in EXP_COUNT.keys():
             EXP_COUNT[k] = 0
     return (
-        dt8_err,
+        MAE,
         dt8_mae,
         dt_max,
         fp16_model,
-        fp8_err,
         fp8_mae,
         k,
         num,
@@ -300,6 +291,19 @@ def __(
         testing_dt,
         testmax,
     )
+
+
+@app.cell
+def __(MAE, fp16_model, np, num_bits, quantize_rowwise):
+    for n in num_bits:
+        maes = []
+        for r_cnt, row in enumerate(fp16_model.state_dict()['0.weight']):
+            o, mx = quantize_rowwise(row.view(1,64), dt = True, num_bits=n)
+            row_mae = MAE(o, row.view(1,64))
+            maes.append(row_mae)
+        print('bitsize: ', n, 'MAE: ', np.mean(maes), 'row MAEs: ', maes)
+        
+    return maes, mx, n, o, r_cnt, row, row_mae
 
 
 @app.cell
