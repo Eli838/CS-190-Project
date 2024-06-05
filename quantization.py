@@ -8,6 +8,16 @@ import numpy as np
 import struct
 import torch.nn.init as init
 
+EXP_COUNT = {0:0,
+             1:0,
+             2:0,
+             3:0,
+             4:0,
+             5:0,
+             6:0,
+             7:0,
+            }
+            
 # input : tensor output: binary string
 def binary(num):
   return ''.join('{:0>8b}'.format(c) for c in struct.pack('!f', num))
@@ -66,31 +76,30 @@ def round_fp8(x, exp = 4):
 
 
 def bisection_quantization(num, bits = 7):
-  val = abs(num)
-  inversed_bits = []
-  # Bisection tree quantization
-  range_min, range_max = 0, 1
-  for _ in range(bits):
-      mid = (range_min + range_max) / 2
-      if val >= mid:
-          inversed_bits.append(1)
-          range_min = mid
-      else:
-          inversed_bits.append(0)
-          range_max = mid
+    if bits == 0:
+        return 0.1
+    val = abs(num)
+    inversed_bits = []
+    # Bisection tree quantization
+    range_min, range_max = 0, 1
+    for p in range(bits):
+        p += 1
+        bit_val = 2**(-p)
+        if val >= bit_val:
+            inversed_bits.append(1)
+            val -= bit_val
+        else:
+            inversed_bits.append(0)
 
-  quantized_val = 0
-  for k, bit in enumerate(inversed_bits):
-      if bit:
-          quantized_val += 2**-(k + 1)
-
-  return quantized_val
+    quantized_val = 0
+    for k, bit in enumerate(inversed_bits):
+        if bit:
+            quantized_val += 2**-(k + 1)
+    return quantized_val
 
 #the input is normalized tensor x,
-def round_dt8(x, exp = 4):
+def round_dt8(x, exp = 4, num_bits = 8):
   val = copy.deepcopy(x)
-  num_levels = 2 ** (7)
-
 
   sign_bit = 0 if val >= 0 else 1
   val = abs(val)
@@ -99,13 +108,14 @@ def round_dt8(x, exp = 4):
       val *= 10
       exp_bits += 1
 
-  bs_bits = max(0, 6 - exp_bits)
-  exp_bits = min(7, exp_bits)
+  bs_bits = max(0, num_bits - 2 - exp_bits)
+  exp_bits = min(num_bits -1, exp_bits)
+  EXP_COUNT[exp_bits] += 1
 
   if exp_bits == 0:
       quantized_val = bisection_quantization(val, 7)
-  elif exp_bits >= 6:
-      quantized_val = val
+  elif exp_bits >= num_bits - 2:
+      quantized_val = 0.0
   else:
       quantized_val = bisection_quantization(val, bs_bits)
 
