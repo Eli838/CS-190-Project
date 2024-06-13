@@ -111,24 +111,27 @@ def __(EXP_COUNT):
 
 
     #unsigned bisection quantization
-    #in-progress
     def bisection_quantization_unsigned(num, bits=7):
         val = num     #no absolute value since unsigned
         inversed_bits = []
+        #determining maximum value representable with the given number of bits
+        max_val = 2**bits
         #bisection tree quantization
-        range_min, range_max = 0, 1
+        range_min, range_max = 0, max_val
         for _ in range(bits):
-            mid = (range_min + range_max) / 2
+            mid = (range_min + range_max) // 2
             if val >= mid:
                 inversed_bits.append(1)
                 range_min = mid
             else:
                 inversed_bits.append(0)
                 range_max = mid
+        #converting inversed_bits to a quantized value
         quantized_val = 0
-        for k, bit in enumerate(inversed_bits):
-            if bit:
-                quantized_val += 2**-(k+1)
+        for bit in inversed_bits:
+                quantized_val = (quantized_val * 2) + bit
+        #scale quantized_val to range [0, 1]
+        quantized_val /= (max_val - 1)
         return quantized_val
 
 
@@ -166,7 +169,6 @@ def __(EXP_COUNT):
 
     #round_dt8_unsigned
     #the input is normalized tensor x
-    #in-progress
     def round_dt8_unsigned(x, exp=4):
         val = x.clone().to(torch.float32)
         for i in range(len(val)):
