@@ -14,26 +14,26 @@ To use Quantization, there are 5 main functions: quantize\_rowwise, dequantize\_
 
 All of these are found in the file `quantization.py`
 
-##quantize\_rowwise()
+## quantize\_rowwise()
 Quantize\_rowwise takes in 2 parameters, a 2d tensor of weights meant to be quantized, and a flag for dynamic tree quantization (default is false). The function returns the normalized, quantized tensors and the corresponding array of maximums for dequantization. The 8 bit datatype is either e4m3 8 bit floating point if the flag is set to false, or the dynamic tree quantization if it is set to true.
 
 ##dequantize\_rowwise()
 Dequantize\_rowwise takes in 2 parameters, the normalized and quantized tensor and its corresponding array of absolute maximums, both of which are returned by the quantize\_rowwise() function. This function returns the dequantized and unnormalized tensors.
 
-##quantize\_stable\_embedding()
+## quantize\_stable\_embedding()
 Quantize\_stable\_embedding takes in 3 parameters, a tensor of weights meant to be quantized that can be any shape, a desired batch size, and a flag for dynamic tree quantization (default is false). The batch size must be a divisor of the number of elements in a tensor. The function returns the normalized, indexed, and quantized tensors reshaped into the original input tensor's shape so that they can be placed back into the model. It also returns the corresponding array of maximums for dequantization and the indexing array. The 8 bit datatype is either e4m3 8 bit floating point if the flag is set to false, or the dynamic tree quantization if it is set to true.
 
-##dequantize\_stable\_embedding()
+## dequantize\_stable\_embedding()
 Dequantize\_stable\_embedding takes in 3 parameters, the quantized, indexed, and normalized tensors, the array of absolute maximums, and the indexing array, all of which are returned by Quantize\_stable\_embedding in that order. The function will dequantize the tensors and place each element back into their original spot while also reshaping the tensor to look like the original tensor. It returns the dequantized and unnormalized tensors.
 
 
 ## measure\_quantization\_error()
 Measure\_quantization\_error() takes in 2 parameters, the array of original tensors and the dequantized array of tensors. It returns the mean absolute error and the absolute error of the two arrays
 
-##round\_fp8()
+## round\_fp8()
 Round\_fp8() takes in two arguments, a single element tensor and an exponent length (default is four). It then quantizes the tensor element by converting it to its content into binary bits and quantizing the exponent and mantissa bits. The function returns a fp8 quantized tensor (e4m3 as the default datatype).
 
-##round\_dt8()
+## round\_dt8()
 Round\_dt8() takes in two arguments, a single element tensor and a number of total bits (default is eight). It quantized the input tensor using the max bitlength, by numerically analyzing the optimal exponent size and possible bisection quantized values using the remaining bits after assigning exponent bits. It returns a dynamic tree quantized tensor. In our code, a global variable dictionary exists to investigate the number of exponent bit lengths used.
 
 # Models
